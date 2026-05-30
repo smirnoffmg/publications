@@ -1,0 +1,61 @@
+name: LaTeX
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed TeX sources
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE_REF: ${{ github.event.before || github.event.pull_request.base.sha }}
+          AFTER_REF: ${{ github.sha }}
+        run: bash .github/scripts/changed-tex.sh "${EVENT_NAME}" "${BEFORE_REF}" "${AFTER_REF}"
+
+      - name: Build PDFs
+        if: steps.changed.outputs.should_build == 'true'
+        uses: ./.github/actions/build-pdfs
+        with:
+          tex_list: ${{ steps.changed.outputs.build_all == 'true' && '' || steps.changed.outputs.tex_list }}
+
+      - name: Upload PDF artifacts
+        if: steps.changed.outputs.should_build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: pdfs
+          path: build/*.pdf
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download PDF artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pdfs
+          path: build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/*.pdf
+          generate_release_notes: true
